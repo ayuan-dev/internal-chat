@@ -1,13 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>发个东西 - 局域网文字/文件P2P传输工具</title>
-  <meta name="description" content="一个简单易用的局域网文件传输工具，基于WebRTC实现点对点连接，支持文本和文件快速传输，无需中转服务器，安全高效。" />
-  <meta name="keywords" content="局域网传输, 点对点传输, 文件分享工具, WebRTC传输, 局域网文件传输, P2P传输工具, 无中转传输" />
-  <script src="./xchatuser.js?v=22"></script>
-  <link rel="stylesheet" href="./style.css?v=22">
+  <script src="./xchatuser.js?v=21"></script>
+  <link rel="stylesheet" href="./style.css?v=20">
 </head>
 <body>
   <div class="dragtip">
@@ -94,6 +92,18 @@
     </div>
   </div>
 
-  <script src="./index.js?v=22"></script>
+  <div class="modal" id="receiveFileModal">
+    <div class="modal-content">
+      <h3>接收文件</h3>
+      <p id="receiveFileName"></p>
+      <p id="receiveFileSize"></p>
+      <div class="modal-footer">
+        <button onclick="rejectReceiveFile()">拒绝</button>
+        <button onclick="acceptReceiveFile()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./index.js?v=21"></script>
 </body>
 </html>

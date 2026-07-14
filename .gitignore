@@ -24,3 +24,14 @@ yarn-error.log*
 internal-chat-linux
 internal-chat-macos
 internal-chat-win.exe
+
+# 自签名 HTTPS 证书（首次启用 https 时自动生成）
+cert/
+
+# 运行时数据库文件（data.js 实际用内存存储，不入库）
+*.db
+data.db
+
+# Windows 资源管理器产物
+desktop.ini
+Thumbs.db

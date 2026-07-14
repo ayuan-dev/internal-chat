@@ -1,9 +1,12 @@
 const WebSocket = require('ws');
 const service = require('./data');
 const path = require('path');
+const os = require('os');
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
+const selfsigned = require('selfsigned');
 
 const originalLog = console.log;
 console.log = function() {
@@ -18,8 +21,42 @@ console.log = function() {
 const HTTP_PORT = process.argv[2] || 8081; // 合并后的统一端口
 const HTTP_DIRECTORY = path.join(__dirname, 'www'); // 静态文件目录
 
-// 创建 HTTP 服务器
-const server = http.createServer((req, res) => {
+// 自签名证书：优先复用已生成的 ./cert，否则首次生成并缓存到磁盘
+function getOrCreateCert() {
+  const baseDir = process.pkg ? path.dirname(process.execPath) : __dirname;
+  const certDir = path.join(baseDir, 'cert');
+  const keyPath = path.join(certDir, 'key.pem');
+  const certPath = path.join(certDir, 'cert.pem');
+  try {
+    if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+      return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+    }
+  } catch (_) { }
+
+  // 收集局域网 IPv4 地址写入证书 SAN，减少主机名不匹配告警
+  const altNames = ['localhost', '127.0.0.1'];
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const ni of ifaces[name] || []) {
+      if (ni.family === 'IPv4' && !ni.internal) altNames.push(ni.address);
+    }
+  }
+  const pems = selfsigned.generate(
+    [{ name: 'commonName', value: 'localhost' }],
+    { days: 3650, keySize: 2048, altNames }
+  );
+  try {
+    if (!fs.existsSync(certDir)) fs.mkdirSync(certDir, { recursive: true });
+    fs.writeFileSync(keyPath, pems.private);
+    fs.writeFileSync(certPath, pems.cert);
+  } catch (_) { /* pkg 等只读环境：仅内存使用，不缓存 */ }
+  return { key: pems.private, cert: pems.cert };
+}
+
+// 仅当显式开启时才启用 HTTPS：npm run start 8081 https  或  HTTPS=1 npm run start 8081
+const useHttps = process.argv[3] === 'https' || process.env.HTTPS === '1';
+
+function requestHandler(req, res) {
   let urlPath = decodeURIComponent(req.url.split('?')[0]); // 去掉查询参数
   if (urlPath === '/') {
     urlPath = '/index.html'; // 默认访问 index.html
@@ -39,10 +76,15 @@ const server = http.createServer((req, res) => {
 
     fs.createReadStream(filePath).pipe(res);
   });
-});
+}
+
+// 创建 HTTP/HTTPS 服务器（WebSocket.Server 会随 server 自动升级为 wss）
+const server = useHttps
+  ? https.createServer(getOrCreateCert(), requestHandler)
+  : http.createServer(requestHandler);
 
 server.listen(HTTP_PORT, () => {
-  console.log(`server start on port ${HTTP_PORT}`);
+  console.log(`server start on port ${HTTP_PORT}${useHttps ? ' (HTTPS, 自签名证书，浏览器需点击“继续访问”)' : ''}`);
 });
 
 

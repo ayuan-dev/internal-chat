@@ -15,12 +15,6 @@ var MD5 = function(d){var r = M(V(Y(X(d),8*d.length)));return r.toLowerCase()};f
 
 // 初始化页面
 function initPage() {
-  // 检测WebRTC支持
-  if (!window.RTCPeerConnection && !window.webkitRTCPeerConnection) {
-    addChatItem('system', '您的浏览器不支持WebRTC，请使用Chrome、Firefox、Safari等现代浏览器访问。');
-    return;
-  }
-
   const roomId = window.location.pathname.split('/')[1];
   if (roomId) {
     // 如果有roomId，显示密码输入框并隐藏主界面
@@ -36,11 +30,8 @@ function initPage() {
         submitRoomPassword();
       }
     };
-    // 自动聚焦密码输入框 
-    // 判断是否非移动端
-    if (!navigator.userAgent.match(/Android/i) && !navigator.userAgent.match(/iPhone/i) && !navigator.userAgent.match(/iPad/i) && !navigator.userAgent.match(/iPod/i)) {
-      setTimeout(() => passwordInput.focus(), 0);
-    }
+    // 自动聚焦密码输入框
+    setTimeout(() => passwordInput.focus(), 0);
   } else {
     // 没有roomId，显示主界面
     document.querySelector('.left').style.display = 'flex';
@@ -210,7 +201,10 @@ function addLinkItem(uid, file) {
   const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
   
   let contentHtml = '';
-  if (isImage) {
+  if (file.saved) {
+    // 通过 File System Access 直接落盘，无需下载链接
+    contentHtml = `<span class="file" title="已保存到本地">[文件] ${file.name}（已保存到本地）</span>`;
+  } else if (isImage) {
     contentHtml = `
       <div class="image-preview">
         <img src="${file.url}" alt="${file.name}" />
@@ -231,7 +225,7 @@ function addLinkItem(uid, file) {
     <div class="chat-item_content">${contentHtml}</div>
   `;
   
-  // 如果是图片，添加点击事件和加载完成后的滚动
+  // 如果是图片，添加点击事件
   if (isImage) {
     const img = chatItem.querySelector('img');
     img.onclick = function() {
@@ -275,19 +269,10 @@ function addLinkItem(uid, file) {
         }
       };
     };
-
-    // 等待图片加载完成后再滚动
-    img.onload = function() {
-      chatBox.scrollTop = chatBox.scrollHeight;
-    };
   }
   
   chatBox.appendChild(chatItem);
-  
-  // 如果不是图片，立即滚动
-  if (!isImage) {
-    chatBox.scrollTop = chatBox.scrollHeight;
-  }
+  chatBox.scrollTop = chatBox.scrollHeight;
 }
 
 function addChatItem(uid, message) {
@@ -307,8 +292,8 @@ function addChatItem(uid, message) {
   const chatBox = document.querySelector('.chat-wrapper');
   const chatItem = document.createElement('div');
   chatItem.className = 'chat-item';
-  const copyText = message;
   let msg = message.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const copyText = msg;
   // 判断是否url，兼容端口号和带参数的网址
   if (/(http|https):\/\/[^\s<>"']+/g.test(msg)) {
     msg = msg.replace(/(http|https):\/\/[^\s<>"']+/g, (url) => {
@@ -473,6 +458,7 @@ function refreshUsers(data) {
     u.onReviceFile = (file) => {
       addLinkItem(u.id, file);
     }
+    u.onReceiveFileRequest = (fileInfo) => receiveFileRequest(fileInfo);
   }
   refreshUsersHTML();
 }
@@ -644,6 +630,53 @@ async function confirmSendFile() {
   pendingFile = null;
 }
 
+// 接收文件：弹窗让用户选择保存位置（File System Access 需用户手势触发）
+let receiveFileResolver = null;
+let receiveFileInfo = null;
+
+function formatFileSize(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+  if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB';
+  return bytes + ' B';
+}
+
+function receiveFileRequest(fileInfo) {
+  return new Promise((resolve) => {
+    receiveFileResolver = resolve;
+    receiveFileInfo = fileInfo;
+    document.getElementById('receiveFileName').textContent = '文件名：' + fileInfo.name;
+    document.getElementById('receiveFileSize').textContent = '大小：' + formatFileSize(fileInfo.size);
+    document.getElementById('receiveFileModal').style.display = 'block';
+  });
+}
+
+function acceptReceiveFile() {
+  document.getElementById('receiveFileModal').style.display = 'none';
+  const resolver = receiveFileResolver;
+  receiveFileResolver = null;
+  if (!resolver) return;
+  if (!window.showSaveFilePicker) {
+    // 浏览器不支持 File System Access，回退到内存方式
+    resolver(null);
+    return;
+  }
+  // 在用户手势内调用 picker，拿到可写句柄后流式落盘
+  window.showSaveFilePicker({ suggestedName: receiveFileInfo ? receiveFileInfo.name : '' })
+    .then(async (handle) => {
+      const writable = await handle.createWritable();
+      resolver(writable);
+    })
+    .catch(() => resolver(null)); // 用户取消也回退到内存
+}
+
+function rejectReceiveFile() {
+  document.getElementById('receiveFileModal').style.display = 'none';
+  const resolver = receiveFileResolver;
+  receiveFileResolver = null;
+  if (resolver) resolver(false);
+}
+
 
 let droptarget = document.body;
     
@@ -686,7 +719,7 @@ document.querySelector('.send-btn').addEventListener('click', () => {
 function showNicknameModal() {
   const modal = document.getElementById('nicknameModal');
   const input = document.getElementById('nicknameInput');
-  input.value = currentNickname.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  input.value = currentNickname;
   modal.style.display = 'block';
   
   // 自动获取焦点
@@ -712,10 +745,9 @@ function closeNicknameModal() {
 
 function saveNickname() {
   const input = document.getElementById('nicknameInput');
-  let nickname = input.value.trim();
+  const nickname = input.value.trim();
   
   if (nickname) {
-    nickname = nickname.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     currentNickname = nickname;
     document.cookie = `nickname=${encodeURIComponent(nickname)}; path=/; max-age=31536000`; // 保存一年
     
@@ -757,25 +789,4 @@ document.addEventListener('DOMContentLoaded', function() {
   if (window.innerWidth <= 768) {
     document.body.classList.remove('show-users');
   }
-
-  // 添加粘贴事件监听
-  document.addEventListener('paste', async (event) => {
-    const items = event.clipboardData?.items;
-    if (!items) return;
-
-    for (const item of items) {
-      if (item.type.indexOf('image') !== -1) {
-        event.preventDefault();
-        const file = item.getAsFile();
-        if (file) {
-          // 创建一个新的 File 对象，确保有正确的文件名
-          const imageFile = new File([file], `pasted-image-${Date.now()}.png`, {
-            type: 'image/png'
-          });
-          await sendFile(imageFile);
-        }
-        break;
-      }
-    }
-  });
 });
